@@ -3,12 +3,14 @@ Author: Wesley Lao
 19 September 2021
 """
 
+import math
 import numpy as np
-from numpy import linalg as la
+from numpy import deg2rad, linalg as la, rad2deg
 import matplotlib.pyplot as plt
 import cv2
 from PIL import Image
 import os
+from pyproj import Proj
 
 ### Fuction for finding angle between vectors
 def angles(vec1,vec2):
@@ -18,17 +20,24 @@ def angles(vec1,vec2):
 
 ### Function for detecting yellowness
 # convert to hsv and test for yellow
-def yellowhsv(im):
+def yellowhsv(im,cornersize):
     # convert im to hsv space
     hsvim = cv2.cvtColor(im, cv2.COLOR_BGR2HSV)
     yelmin = np.array([25,40,40])
     yelmax = np.array([80,255,255])
     mask = cv2.inRange(hsvim, yelmin, yelmax)
     cv2.imshow("mask", mask)
-    kernel = np.ones((5,5),np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    kernel = np.ones((3,3),np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # guassian blur
+    # mask = cv2.GaussianBlur(mask,(cornersize,cornersize),sigmaX=int(cornersize/2),sigmaY=int(cornersize/2))
+    # open and close
+    # mask = closeopen(mask,int(cornersize/2))
+    # mask = openclose(mask,int(cornersize/2))
+    mask = openclose(mask,int(cornersize))
+    # smooth edges
+    print(cornersize)
+    if cornersize>2:
+        mask = cv2.medianBlur(mask, cornersize)
+    cv2.imshow("filtered", mask)
     contours, hierarchy = cv2.findContours(mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
     if len(contours) != 0:
         cv2.drawContours(im,contours,-1,(255,0,0),3)
@@ -37,7 +46,6 @@ def yellowhsv(im):
         x,y,w,h = cv2.boundingRect(c)
         # extract subimage for corner detection
         subim = mask[y:y+h,x:x+w]
-        print(np.max(subim))
         cv2.imshow("subimage", subim)
         # draw the biggest contour (c) in green
         cv2.rectangle(im,(x,y),(x+w,y+h),(0,255,0),2)
@@ -45,50 +53,99 @@ def yellowhsv(im):
     return im, mask, contours, subim
 # endDef
 
-def frownCheck(im):
-    # smooth edges
-    cv2.imshow("rough", im)
-    im = cv2.medianBlur(im, 5)
-    cv2.imshow("filter", im)
+def openclose(src, kernelsize):
+    kernel = np.ones((kernelsize,kernelsize), np.uint8)
+    ret = cv2.morphologyEx(src, cv2.MORPH_OPEN, kernel)
+    ret = cv2.morphologyEx(ret, cv2.MORPH_CLOSE, kernel)
+    return ret
+
+def closeopen(src, kernelsize):
+    kernel = np.ones((kernelsize,kernelsize),int)
+    ret = cv2.morphologyEx(src, cv2.MORPH_CLOSE, kernel)
+    ret = cv2.morphologyEx(ret, cv2.MORPH_OPEN, kernel)
+    return ret
+
+def frownCheck(im, cornersize):
     # find corners
-    dst = cv2.cornerHarris(im,2,3,0.04)
-    dst = cv2.dilate(dst,None)
-    ret, dst = cv2.threshold(dst,0.01*dst.max(),255,0)
-    dst = np.uint8(dst)
-
-    # find centroids
-    ret, labels, stats, centroids = cv2.connectedComponentsWithStats(dst)
-
-    # define the criteria to stop and refine the corners
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.001)
-    corners = cv2.cornerSubPix(im,np.float32(centroids),(5,5),(-1,-1),criteria)
-
-    # Now draw them
-    res = np.hstack((centroids,corners))
-    res = np.int0(res)
+    corners = cv2.goodFeaturesToTrack(im, 28, 0.5, cornersize)
+    corners = np.int0(corners)
     im = cv2.cvtColor(im,cv2.COLOR_GRAY2BGR)
-    for i in res:
-        cv2.circle(im,(i[1],i[0]),3,[0,255,0],-1)
-        cv2.circle(im,(i[2],i[3]),3,[0,0,255],-1)
-    if res.shape[0]>24:
+    for i in corners:
+        x,y = i.ravel()
+        cv2.circle(im,(x,y),1,[0,255,0],-1)
+    if corners.shape[0]>=10:
         return im, corners, True
     else:
         return im, corners, False
 # endDef
 
+### Rotation Matrix
+def rotmat(angle):
+    return np.array([[math.cos(deg2rad(angle)), -1*math.sin(deg2rad(angle))],\
+                     [math.sin(deg2rad(angle)), math.cos(deg2rad(angle))]])
+# endDef
+
+### Function returning geolocation of target center
+def geoloc(im,lat,lon,altmsl,offnad,squint,aoa,head,x,y,fov=[30,30],grdmsl=600):
+    imshape = im.shape #px [x,y]
+
+    ### Flat earth approximation
+    # latlon to utm
+    altagl = altmsl-grdmsl
+    p = Proj(proj='utm',ellps='WGS84')
+    eas,nor = p(lon,lat)
+
+    # location of target
+    anglex = x/(imshape[0]) - 0.5
+    anglex = anglex*fov[0] + offnad
+    angley = y/(imshape[1]) - 0.5
+    angley = angley*fov[1] + squint + aoa
+
+    ydist = altagl*math.tan(deg2rad(angley))
+    xdist = ydist*math.tan(deg2rad(anglex))
+
+    offset = np.multiply([xdist,ydist],rotmat(-1*head))
+    tarloc = [eas,nor] + offset
+
+    tarlon,tarlat = p(tarloc[0],tarloc[1],inverse=True)
+    
+    return tarlon,tarlat   
+# endDef
+
 if __name__ == "__main__":
     imageDir = "C:\\Users\\wesle\\Documents\\ASE 361L\\Image Rec"
-    # imfile = os.path.join(imageDir,"Smile_Wide.png")
-    imfile = os.path.join(imageDir,"Frown_Wide.png")
-    if os.path.isfile(imfile):
-            im = cv2.imread(imfile)
+    smilefile = os.path.join(imageDir,"Smile_Wide.png")
+    frownfile = os.path.join(imageDir,"Frown_Wide.png")
+    files = [smilefile,frownfile]
+    for file in files:
+        if os.path.isfile(file):
+            im = cv2.imread(file)
             # cv2.imshow("full-scale",im)
-            smallim = cv2.resize(im, (int(im.shape[1]/6), int(im.shape[0]/6)), interpolation=cv2.INTER_AREA)
-            cv2.imshow("reduced",smallim)
-    traceim, mask, contours, subim = yellowhsv(smallim)
-    subim, corners, frown = frownCheck(subim)
-    print(frown)
-    cv2.imshow("corners",subim)
-    # test for frown
-    cv2.waitKey(0)
+            res = 175
+            im = cv2.resize(im, (int(res*im.shape[1]/im.shape[0]), res), interpolation=cv2.INTER_AREA)
+            cv2.imshow("reduced",im)
+            cornersize = im.shape[0]/150
+            cornersize = 2**(int(np.log(cornersize)/np.log(2))-1)+1
+            # cornersize = 0
+            # while cornersize < 3:
+            #     try:
+            #         cornersize = int(im.shape[0]/150)
+            #         cornersize = 2**(int(np.log(cornersize)/np.log(2))-1)+1
+            #     except:
+            #         im = cv2.resize(im, 2*im.shape[0:1], interpolation=cv2.INTER_AREA)
+            # cv2.imshow("upscaled",im)
+            print(cornersize)
+            traceim, mask, contours, subim = yellowhsv(im, cornersize)
+            print(np.max(subim.shape))
+            # if subim.shape[0]<25:
+            #     im = cv2.resize(im, (int(im.shape[1]*10), int(im.shape[0]*10)), interpolation=cv2.INTER_AREA)
+            #     cv2.imshow("upscaled",im)
+            #     cornersize = int(im.shape[0]/150)
+            #     cornersize = 2**(int(np.log(cornersize)/np.log(2))-1)+1
+            # test for frown
+            subim, corners, frown = frownCheck(subim, cornersize)
+            print('Number of Corners: %s' %corners.shape[0])
+            print('Frown: %s' %frown)
+            cv2.imshow("corners",subim)
+            cv2.waitKey(0)
     
