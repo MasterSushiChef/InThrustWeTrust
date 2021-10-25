@@ -3,7 +3,6 @@ Author: Wesley Lao
 19 September 2021
 """
 
-import math
 import numpy as np
 from numpy import deg2rad, linalg as la, rad2deg
 import matplotlib.pyplot as plt
@@ -11,6 +10,7 @@ import cv2
 from PIL import Image
 import os
 from pyproj import Proj
+import atrConstants as atrC
 
 ### Fuction for finding angle between vectors
 def angles(vec1,vec2):
@@ -50,7 +50,9 @@ def yellowhsv(im,cornersize):
         # draw the biggest contour (c) in green
         cv2.rectangle(im,(x,y),(x+w,y+h),(0,255,0),2)
         cv2.imshow("contour", im)
-    return im, mask, contours, subim
+        return im, mask, contours, subim
+    else:
+        return None, None, None, None
 # endDef
 
 def openclose(src, kernelsize):
@@ -81,33 +83,40 @@ def frownCheck(im, cornersize):
 
 ### Rotation Matrix
 def rotmat(angle):
-    return np.array([[math.cos(deg2rad(angle)), -1*math.sin(deg2rad(angle))],\
-                     [math.sin(deg2rad(angle)), math.cos(deg2rad(angle))]])
+    return np.array([[np.cos(deg2rad(angle)), -1*np.sin(deg2rad(angle))],\
+                     [np.sin(deg2rad(angle)), np.cos(deg2rad(angle))]])
 # endDef
 
 ### Function returning geolocation of target center
-def geoloc(im,lat,lon,altmsl,offnad,squint,aoa,head,x,y,fov=[30,30],grdmsl=600):
+def geoloc(im,lat,lon,altmsl,offnad,pitch,roll,head,x,y,grdmsl=600):
     imshape = im.shape #px [x,y]
+    xcam = 1
+    zcam = 1
+    # TODO: add camera FS and WL to constants file
 
     ### Flat earth approximation
     # latlon to utm
     altagl = altmsl-grdmsl
+    altcam = altagl + xcam*np.sin(pitch) - zcam*np.cos(pitch)
     p = Proj(proj='utm',ellps='WGS84')
     eas,nor = p(lon,lat)
 
+    # cam offset
+    camoff = np.array([0, xcam*np.cos(pitch) + zcam*np.sin(pitch)])
+
     # location of target
     anglex = x/(imshape[0]) - 0.5
-    anglex = anglex*fov[0] + offnad
+    anglex = anglex*fov[0] + offnad + roll
     angley = y/(imshape[1]) - 0.5
-    angley = angley*fov[1] + squint + aoa
+    angley = angley*fov[1] + pitch
 
-    ydist = altagl*math.tan(deg2rad(angley))
-    xdist = ydist*math.tan(deg2rad(anglex))
+    ydist = altcam*np.tan(deg2rad(angley))
+    xdist = altcam*np.tan(deg2rad(anglex))
+    tarxy = np.array([xdist,ydist]) + camoff
 
-    offset = np.multiply([xdist,ydist],rotmat(-1*head))
-    tarloc = [eas,nor] + offset
+    tarne = np.multiply(tarxy,rotmat(-1*head))
 
-    tarlon,tarlat = p(tarloc[0],tarloc[1],inverse=True)
+    tarlon,tarlat = p(tarne[0],tarne[1],inverse=True)
     
     return tarlon,tarlat   
 # endDef
