@@ -10,7 +10,7 @@ import cv2
 from PIL import Image
 import os
 from pyproj import Proj
-import atrConstants as atrC
+from atrConstants import *
 
 ### Fuction for finding angle between vectors
 def angles(vec1,vec2):
@@ -41,18 +41,26 @@ def yellowhsv(im,cornersize):
     contours, hierarchy = cv2.findContours(mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
     if len(contours) != 0:
         cv2.drawContours(im,contours,-1,(255,0,0),3)
+
         # find the biggest countour (c) by the area
         c = max(contours, key = cv2.contourArea)
         x,y,w,h = cv2.boundingRect(c)
+        center = np.array([int(x+w/2),int(y+h/2)])
+
+        # if no yellow area large enough, return none
+        if np.max([w,h])<20:
+            return None, None, None, None, None
+        
         # extract subimage for corner detection
         subim = mask[y:y+h,x:x+w]
         cv2.imshow("subimage", subim)
+        
         # draw the biggest contour (c) in green
         cv2.rectangle(im,(x,y),(x+w,y+h),(0,255,0),2)
         cv2.imshow("contour", im)
-        return im, mask, contours, subim
+        return im, mask, contours, subim, center
     else:
-        return None, None, None, None
+        return None, None, None, None, None
 # endDef
 
 def openclose(src, kernelsize):
@@ -88,12 +96,7 @@ def rotmat(angle):
 # endDef
 
 ### Function returning geolocation of target center
-def geoloc(im,lat,lon,altmsl,offnad,pitch,roll,head,x,y,grdmsl=600):
-    imshape = im.shape #px [x,y]
-    xcam = 1
-    zcam = 1
-    # TODO: add camera FS and WL to constants file
-
+def geoloc(imshape,lat,lon,altmsl,offnad,pitch,roll,head,x,y,grdmsl=600):
     ### Flat earth approximation
     # latlon to utm
     altagl = altmsl-grdmsl
@@ -144,7 +147,7 @@ if __name__ == "__main__":
             #         im = cv2.resize(im, 2*im.shape[0:1], interpolation=cv2.INTER_AREA)
             # cv2.imshow("upscaled",im)
             print(cornersize)
-            traceim, mask, contours, subim = yellowhsv(im, cornersize)
+            traceim, mask, contours, subim, center = yellowhsv(im, cornersize)
             print(np.max(subim.shape))
             # if subim.shape[0]<25:
             #     im = cv2.resize(im, (int(im.shape[1]*10), int(im.shape[0]*10)), interpolation=cv2.INTER_AREA)
