@@ -80,20 +80,37 @@ def frownCheck(im, cornersize):
 # endDef
 
 ### Rotation Matrix
-def rotmat(angle):
-    return np.array([[math.cos(deg2rad(angle)), -1*math.sin(deg2rad(angle))],\
-                     [math.sin(deg2rad(angle)), math.cos(deg2rad(angle))]])
+def rotmat(*args):
+    if len(args) <= 3:
+        rot = np.identity(3)
+        indices = np.array([0,1,2])
+        for i, arg in enumerate(args):
+            r = np.identity(3)
+            angle = ((-1)**i)*deg2rad(arg)
+            rmini = np.array([[math.cos(angle), -1*math.sin(angle)],\
+                              [math.sin(angle), math.cos(angle)]])
+            imini = indices[np.not_equal(indices,i)]
+            print(r[np.min(imini):np.max(imini)+1,np.min(imini):np.max(imini)+1])
+            r[np.min(imini):np.max(imini)+1,np.min(imini):np.max(imini)+1] = rmini
+            print(r)
+            rot = np.matmul(rot,r)
+        return rot
 # endDef
 
 ### Function returning geolocation of target center
 def geoloc(im,lat,lon,altmsl,offnad,squint,aoa,head,x,y,fov=[30,30],grdmsl=600):
     imshape = im.shape #px [x,y]
-
+    cam2gps = np.array([16/39.37, 0, 4/39.37]) #m [FS,BL,WL]
+    body2horz = np.array([[]])
+    camoffset = np.matmul(cam2gps,np.array([]))# [x,y,z]
     ### Flat earth approximation
     # latlon to utm
-    altagl = altmsl-grdmsl
+    altagl = altmsl-grdmsl + cam2gps*math.sin(deg2rad(aoa))
     p = Proj(proj='utm',ellps='WGS84')
     eas,nor = p(lon,lat)
+    gpsloc = [eas,nor]
+    camoffset = cam2gps*math.cos(deg2rad(aoa))
+    gpsloc = gpsloc + np.matmul(np.array([0,camoffset]),rotmat(-1*head))
 
     # location of target
     anglex = x/(imshape[0]) - 0.5
@@ -104,8 +121,8 @@ def geoloc(im,lat,lon,altmsl,offnad,squint,aoa,head,x,y,fov=[30,30],grdmsl=600):
     ydist = altagl*math.tan(deg2rad(angley))
     xdist = ydist*math.tan(deg2rad(anglex))
 
-    offset = np.multiply([xdist,ydist],rotmat(-1*head))
-    tarloc = [eas,nor] + offset
+    offset = np.matmul([xdist,ydist],rotmat(-1*head))
+    tarloc = gpsloc + offset
 
     tarlon,tarlat = p(tarloc[0],tarloc[1],inverse=True)
     
@@ -117,6 +134,9 @@ if __name__ == "__main__":
     smilefile = os.path.join(imageDir,"Smile_Wide.png")
     frownfile = os.path.join(imageDir,"Frown_Wide.png")
     files = [smilefile,frownfile]
+
+    r = rotmat(45,30,60)
+
     for file in files:
         if os.path.isfile(file):
             im = cv2.imread(file)
