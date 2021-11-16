@@ -3,7 +3,6 @@ Author: Wesley Lao
 19 September 2021
 """
 
-import math
 import numpy as np
 from numpy import deg2rad, linalg as la, rad2deg
 import matplotlib.pyplot as plt
@@ -11,6 +10,7 @@ import cv2
 from PIL import Image
 import os
 from pyproj import Proj
+from atrConstants import *
 
 ### Fuction for finding angle between vectors
 def angles(vec1,vec2):
@@ -41,16 +41,26 @@ def yellowhsv(im,cornersize):
     contours, hierarchy = cv2.findContours(mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
     if len(contours) != 0:
         cv2.drawContours(im,contours,-1,(255,0,0),3)
+
         # find the biggest countour (c) by the area
         c = max(contours, key = cv2.contourArea)
         x,y,w,h = cv2.boundingRect(c)
+        center = np.array([int(x+w/2),int(y+h/2)])
+
+        # if no yellow area large enough, return none
+        if np.max([w,h])<20:
+            return None, None, None, None, None
+        
         # extract subimage for corner detection
         subim = mask[y:y+h,x:x+w]
         cv2.imshow("subimage", subim)
+        
         # draw the biggest contour (c) in green
         cv2.rectangle(im,(x,y),(x+w,y+h),(0,255,0),2)
         cv2.imshow("contour", im)
-    return im, mask, contours, subim
+        return im, mask, contours, subim, center
+    else:
+        return None, None, None, None, None
 # endDef
 
 def openclose(src, kernelsize):
@@ -80,6 +90,7 @@ def frownCheck(im, cornersize):
 # endDef
 
 ### Rotation Matrix
+<<<<<<< HEAD:imageDetect.py
 def rotmat(*args):
     if len(args) <= 3:
         rot = np.identity(3)
@@ -106,25 +117,46 @@ def geoloc(im,lat,lon,altmsl,offnad,squint,aoa,head,x,y,fov=[30,30],grdmsl=600):
     ### Flat earth approximation
     # latlon to utm
     altagl = altmsl-grdmsl + cam2gps*math.sin(deg2rad(aoa))
+=======
+def rotmat(angle):
+    return np.array([[np.cos(deg2rad(angle)), -1*np.sin(deg2rad(angle))],\
+                     [np.sin(deg2rad(angle)), np.cos(deg2rad(angle))]])
+# endDef
+
+### Function returning geolocation of target center
+def geoloc(imshape,lat,lon,altmsl,offnad,pitch,roll,head,x,y,grdmsl=600):
+    ### Flat earth approximation
+    # latlon to utm
+    altagl = altmsl-grdmsl
+    altcam = altagl + xcam*np.sin(pitch) - zcam*np.cos(pitch)
+>>>>>>> ff471592d2b8923d65eb7a5ecb0f16dfa27d42a9:atrUtils.py
     p = Proj(proj='utm',ellps='WGS84')
     eas,nor = p(lon,lat)
     gpsloc = [eas,nor]
     camoffset = cam2gps*math.cos(deg2rad(aoa))
     gpsloc = gpsloc + np.matmul(np.array([0,camoffset]),rotmat(-1*head))
 
+    # cam offset
+    camoff = np.array([0, xcam*np.cos(pitch) + zcam*np.sin(pitch)])
+
     # location of target
     anglex = x/(imshape[0]) - 0.5
-    anglex = anglex*fov[0] + offnad
+    anglex = anglex*fov[0] + offnad + roll
     angley = y/(imshape[1]) - 0.5
-    angley = angley*fov[1] + squint + aoa
+    angley = angley*fov[1] + pitch
 
-    ydist = altagl*math.tan(deg2rad(angley))
-    xdist = ydist*math.tan(deg2rad(anglex))
+    ydist = altcam*np.tan(deg2rad(angley))
+    xdist = altcam*np.tan(deg2rad(anglex))
+    tarxy = np.array([xdist,ydist]) + camoff
 
+<<<<<<< HEAD:imageDetect.py
     offset = np.matmul([xdist,ydist],rotmat(-1*head))
     tarloc = gpsloc + offset
+=======
+    tarne = np.multiply(tarxy,rotmat(-1*head))
+>>>>>>> ff471592d2b8923d65eb7a5ecb0f16dfa27d42a9:atrUtils.py
 
-    tarlon,tarlat = p(tarloc[0],tarloc[1],inverse=True)
+    tarlon,tarlat = p(tarne[0],tarne[1],inverse=True)
     
     return tarlon,tarlat   
 # endDef
@@ -155,7 +187,7 @@ if __name__ == "__main__":
             #         im = cv2.resize(im, 2*im.shape[0:1], interpolation=cv2.INTER_AREA)
             # cv2.imshow("upscaled",im)
             print(cornersize)
-            traceim, mask, contours, subim = yellowhsv(im, cornersize)
+            traceim, mask, contours, subim, center = yellowhsv(im, cornersize)
             print(np.max(subim.shape))
             # if subim.shape[0]<25:
             #     im = cv2.resize(im, (int(im.shape[1]*10), int(im.shape[0]*10)), interpolation=cv2.INTER_AREA)
