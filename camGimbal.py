@@ -2,8 +2,14 @@
 Author: Wesley Lao
 12 November 2021
 """
-# numpy not recognized by Mission Planner env
-# import numpy as np
+
+import sys
+libpath = r"C:\Users\wesle\miniconda3\envs\arduPy\Lib\site-packages" 
+pypath = r"C:\Users\wesle\miniconda3\envs\arduPy\Lib" 
+sys.path.append(libpath)
+sys.path.append(pypath)
+
+import numpy as np
 
 # some imports seen online, not sure if necessary
 import clr
@@ -23,20 +29,20 @@ centerAng = -5 # deg
 rangeOfMot = 45 # deg
 rollExtremes = [centerAng - rangeOfMot, centerAng + rangeOfMot]
 
+# set true if camera control only desired while plane is armed
+onlyWhileArmed = False
+
 # printing variable for debugging
 # only prints first time through
 printed = False
 
-# set true if camera control only desired while plane is armed
-onlyWhileArmed = False
+# set true if only controlling camera
+# loops the control script indefinitely,
+# call controlCam in separate controller if paired with other scripts
+looping = True
 
-print("Starting Camera Control...")
-
-if onlyWhileArmed:
-    if not cs.armed:
-        print("Waiting for Plane to be armed...")
-
-while True:
+def controlCam(reverse, camChannel, centerAng, rangeOfMot, rollExtremes, printed):
+    run = False
     if onlyWhileArmed:
         if cs.armed:
             run = True
@@ -45,7 +51,6 @@ while True:
                 printed = True
         else:
             run = False
-            MAV.doCommand(MAVLink.MAV_CMD.DO_SET_SERVO, camChannel, 1500, 0, 0, 0, 0, 0)
             if printed:
                 print("UNARMED, Camera Control OFF")
                 printed = False
@@ -71,5 +76,17 @@ while True:
             pwm = 1500 + a*500*(roll-centerAng)/rangeOfMot
             
         MAV.doCommand(MAVLink.MAV_CMD.DO_SET_SERVO, camChannel, pwm, 0, 0, 0, 0, 0)
+    
+    return printed
 
+print("Starting Camera Control...")
 
+if onlyWhileArmed:
+    if not cs.armed:
+        print("Waiting for Plane to be armed...")
+
+# set to neutral
+MAV.doCommand(MAVLink.MAV_CMD.DO_SET_SERVO, camChannel, 1500, 0, 0, 0, 0, 0)
+
+while looping:
+    printed = controlCam(reverse, camChannel, centerAng, rangeOfMot, rollExtremes, printed)
